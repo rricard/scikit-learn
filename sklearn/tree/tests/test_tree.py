@@ -412,6 +412,25 @@ def test_multioutput():
     assert_almost_equal(y_hat, y_true)
     assert_equal(y_hat.shape, (4, 2))
 
+def test_prune_8_boston():
+    clf = tree.DecisionTreeRegressor(max_depth=8)
+    clf = clf.fit(boston.data, boston.target)
+    clf = clf.prune(8)
+
+    assert_equal(clf.tree_.node_count, 15)  # 8 leaves => 15 nodes
+
+def test_prune_path_boston():
+    clf = tree.DecisionTreeRegressor(max_depth=8)
+    scores = tree.prune_path(clf, boston.data, boston.target, 
+                             max_n_leaves=20, n_iterations=10, random_state=0)
+
+    assert_equal(len(scores), 19)
+    assert_equal(len(scores[0]), 10)
+
+    # TODO: make this less brittle
+    from numpy import mean, round_
+    assert_equal(round_(mean(scores[0]), 2), 0.83)
+    assert_equal(round_(mean(scores[18]), 2), 0.35)
 
 if __name__ == "__main__":
     import nose
