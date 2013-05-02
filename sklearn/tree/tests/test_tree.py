@@ -474,7 +474,7 @@ def test_prune_8_boston():
     clf = clf.fit(boston.data, boston.target)
     clf = clf.prune(8)
 
-    assert_equal(clf.tree_.node_count, 15)  # 8 leaves => 15 nodes
+    assert_equal(sum(clf.tree_.children_left == tree._tree.TREE_LEAF), 8)
 
 def test_prune_path_boston():
     clf = tree.DecisionTreeRegressor(max_depth=8)
