@@ -1,0 +1,9 @@
+differences between old and new tree class
+
+old: .py
+new: .pyx
+
+old: children array with shape (capacity, 2)
+new: split into children_left and children_right, each with shape (capacity,)
+
+new: added capacity, length of arrays

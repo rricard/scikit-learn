@@ -48,6 +48,101 @@ REGRESSION = {
     "mse": _tree.MSE,
 }
 
+''' TODO: update these methods of Tree class for new version
+    def pruning_order(self, max_to_prune=None):
+        """Compute the order for which the tree should be pruned.
+
+        The algorithm used is weakest link pruning. It removes first the nodes
+        that improve the tree the least.
+
+
+        Parameters
+        ----------
+        max_to_prune : int, optional (default=all the nodes)
+            maximum number of nodes to prune
+
+        Returns
+        -------
+        nodes : numpy array
+            list of the nodes to remove to get to the optimal subtree.
+
+        References
+        ----------
+
+        .. [1] J. Friedman and T. Hastie, "The elements of statistical
+        learning", 2001, section 9.2.1
+
+        """
+
+        def _get_terminal_nodes(children):
+            """Lists the nodes that only have leaves as children"""
+            leaves = self._get_leaves(children)
+            child_is_leaf = np.in1d(children, leaves).reshape(children.shape)
+            return np.where(np.all(child_is_leaf, axis=1))[0]
+
+        def _next_to_prune(tree, children=None):
+            """Weakest link pruning for the subtree defined by children"""
+
+            if children is None:
+                children = tree.children
+
+            t_nodes = _get_terminal_nodes(children)
+            g_i = tree.init_error[t_nodes] - tree.best_error[t_nodes]
+
+            return t_nodes[np.argmin(g_i)]
+
+        if max_to_prune is None:
+            max_to_prune = self.node_count
+
+        children = self.children.copy()
+        nodes = list()
+
+        while True:
+            node = _next_to_prune(self, children)
+            nodes.append(node)
+
+            if (len(nodes) == max_to_prune) or (node == 0):
+                return np.array(nodes)
+
+            #Remove the subtree from the children array
+            children[children[node], :] = Tree.UNDEFINED
+            children[node, :] = Tree.LEAF
+
+    def prune(self, n_leaves):
+        """Prunes the tree to obtain the optimal subtree with n_leaves leaves.
+
+
+        Parameters
+        ----------
+        n_leaves : int
+            The final number of leaves the algorithm should bring
+
+        Returns
+        -------
+        tree : a Tree object
+            returns a new, pruned, tree
+
+        References
+        ----------
+
+        .. [1] J. Friedman and T. Hastie, "The elements of statistical
+        learning", 2001, section 9.2.1
+
+        """
+
+        to_remove_count = self.node_count - len(self.leaves) - n_leaves + 1
+        nodes_to_remove = self.pruning_order(to_remove_count)
+
+        out_tree = self._copy()
+
+        for node in nodes_to_remove:
+            #TODO: Add a Tree method to remove a branch of a tree
+            out_tree.children[out_tree.children[node], :] = Tree.UNDEFINED
+            out_tree.children[node, :] = Tree.LEAF
+            out_tree.node_count -= 2
+
+        return out_tree
+'''
 
 class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator, SelectorMixin)):
     """Base class for decision trees.
@@ -70,6 +165,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator, SelectorMixin)
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
+        self.n_leaves = n_leaves
         self.min_density = min_density
         self.max_features = max_features
 
@@ -89,6 +185,23 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator, SelectorMixin)
         self.find_split_ = _tree.TREE_SPLIT_BEST
 
         self.tree_ = None
+
+    # TODO: update this method if necessary after updating Tree class prune method
+    def prune(self, n_leaves):
+        """Prunes the decision tree
+
+        This method is necessary to avoid overfitting tree models. While broad
+        decision trees should be computed in the first place, pruning them
+        allows for smaller trees.
+
+        Parameters
+        ----------
+        n_leaves : int
+            the number of leaves of the pruned tree
+
+        """
+        self.tree_ = self.tree_.prune(n_leaves)
+        return self
 
     def fit(self, X, y,
             sample_mask=None, X_argsorted=None,
@@ -273,6 +386,9 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator, SelectorMixin)
             self.n_classes_ = self.n_classes_[0]
             self.classes_ = self.classes_[0]
 
+        if self.n_leaves is not None:
+            self.prune(self.n_leaves)
+
         return self
 
     def predict(self, X):
@@ -382,6 +498,10 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
     min_samples_leaf : integer, optional (default=1)
         The minimum number of samples required to be at a leaf node.
 
+    n_leaves : integer, optional (default=None)
+        The number of leaves of the post-pruned tree. If None, no post-pruning
+        will be run.
+
     min_density : float, optional (default=0.1)
         This parameter controls a trade-off in an optimization heuristic. It
         controls the minimum density of the `sample_mask` (i.e. the
@@ -464,6 +584,7 @@ class DecisionTreeClassifier(BaseDecisionTree, ClassifierMixin):
                                                      max_depth,
                                                      min_samples_split,
                                                      min_samples_leaf,
+                                                     n_leaves,
                                                      min_density,
                                                      max_features,
                                                      compute_importances,
@@ -578,6 +699,10 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
     min_samples_leaf : integer, optional (default=1)
         The minimum number of samples required to be at a leaf node.
 
+    n_leaves : integer, optional (default=None)
+        The number of leaves of the post-pruned tree. If None, no post-pruning
+        will be run.
+
     min_density : float, optional (default=0.1)
         This parameter controls a trade-off in an optimization heuristic. It
         controls the minimum density of the `sample_mask` (i.e. the
@@ -654,6 +779,7 @@ class DecisionTreeRegressor(BaseDecisionTree, RegressorMixin):
                                                     max_depth,
                                                     min_samples_split,
                                                     min_samples_leaf,
+                                                    n_leaves,
                                                     min_density,
                                                     max_features,
                                                     compute_importances,
@@ -695,6 +821,7 @@ class ExtraTreeClassifier(DecisionTreeClassifier):
                                                   max_depth,
                                                   min_samples_split,
                                                   min_samples_leaf,
+                                                  n_leaves,
                                                   min_density,
                                                   max_features,
                                                   compute_importances,
@@ -742,9 +869,75 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
                                                  max_depth,
                                                  min_samples_split,
                                                  min_samples_leaf,
+                                                 n_leaves,
                                                  min_density,
                                                  max_features,
                                                  compute_importances,
                                                  random_state)
 
         self.find_split_ = _tree.TREE_SPLIT_RANDOM
+
+
+def prune_path(clf, X, y, max_n_leaves=10, n_iterations=10,
+                          test_size=0.1, random_state=None):
+    """Cross validation of scores for different values of the decision tree.
+
+    This function allows to test what the optimal size of the post-pruned
+    decision tree should be. It computes cross validated scores for different
+    size of the tree.
+
+    Parameters
+    ----------
+    clf: decision tree estimator object
+        The object to use to fit the data
+
+    X: array-like of shape at least 2D
+        The data to fit.
+
+    y: array-like
+        The target variable to try to predict.
+
+    max_n_leaves : int, optional (default=10)
+        maximum number of leaves of the tree to prune
+
+    n_iterations : int, optional (default=10)
+        Number of re-shuffling & splitting iterations.
+
+    test_size : float (default=0.1) or int
+        If float, should be between 0.0 and 1.0 and represent the
+        proportion of the dataset to include in the test split. If
+        int, represents the absolute number of test samples.
+
+    random_state : int or RandomState
+        Pseudo-random number generator state used for random sampling.
+
+    Returns
+    -------
+    scores : list of list of floats
+        The scores of the computed cross validated trees grouped by tree size.
+        scores[0] correspond to the values of trees of size max_n_leaves and
+        scores[-1] to the tree with just two leaves.
+
+    """
+
+    from ..base import clone
+    from ..cross_validation import ShuffleSplit
+
+    scores = list()
+
+    kf = ShuffleSplit(len(y), n_iterations, test_size,
+                      random_state=random_state)
+    for train, test in kf:
+        estimator = clone(clf)
+        fitted = estimator.fit(X[train], y[train])
+
+        loc_scores = list()
+        for i in range(max_n_leaves, 1, -1):
+            #We loop from the bigger values to the smaller ones in order to be
+            #able to compute the original tree once, and then make it smaller
+            fitted.prune(n_leaves=i)
+            loc_scores.append(fitted.score(X[test], y[test]))
+
+        scores.append(loc_scores)
+
+    return zip(*scores)
