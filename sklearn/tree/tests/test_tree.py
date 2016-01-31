@@ -787,6 +787,25 @@ def test_classes_shape():
         assert_array_equal(clf.n_classes_, [2, 2])
         assert_array_equal(clf.classes_, [[-1, 1], [-2, 2]])
 
+def test_prune_8_boston():
+    clf = tree.DecisionTreeRegressor(max_depth=8)
+    clf = clf.fit(boston.data, boston.target)
+    clf = clf.prune(8)
+
+    assert_equal(sum(clf.tree_.children_left == tree._tree.TREE_LEAF), 8)
+
+def test_prune_path_boston():
+    clf = tree.DecisionTreeRegressor(max_depth=8)
+    scores = tree.prune_path(clf, boston.data, boston.target, 
+                             max_n_leaves=20, n_iterations=10, random_state=0)
+
+    assert_equal(len(scores), 19)
+    assert_equal(len(scores[0]), 10)
+
+    # TODO: make this less brittle
+    from numpy import mean, round_
+    assert_equal(round_(mean(scores[0]), 2), 0.83)
+    assert_equal(round_(mean(scores[18]), 2), 0.35)
 
 def test_unbalanced_iris():
     # Check class rebalancing.
@@ -842,6 +861,17 @@ def test_memory_layout():
         y = iris.target[::3]
         assert_array_equal(est.fit(X, y).predict(X), y)
 
+'''
+def test_unbalanced_iris():
+    """Check class rebalancing."""
+    unbalanced_X = iris.data[:125]
+    unbalanced_y = iris.target[:125]
+    sample_weight = balance_weights(unbalanced_y)
+
+    clf = tree.DecisionTreeClassifier()
+    clf.fit(unbalanced_X, unbalanced_y, sample_weight=sample_weight)
+    assert_almost_equal(clf.predict(unbalanced_X), unbalanced_y)
+'''
 
 def test_sample_weight():
     # Check sample weighting.

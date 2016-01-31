@@ -64,6 +64,115 @@ DENSE_SPLITTERS = {"best": _splitter.BestSplitter,
 SPARSE_SPLITTERS = {"best": _splitter.BestSparseSplitter,
                     "random": _splitter.RandomSparseSplitter}
 
+REGRESSION = {
+    "mse": _tree.MSE,
+}
+ 
+def pruning_order(self, max_to_prune=None):
+    """Compute the order for which the tree should be pruned.
+
+    The algorithm used is weakest link pruning. It removes first the nodes
+    that improve the tree the least.
+
+
+    Parameters
+    ----------
+    max_to_prune : int, optional (default=all the nodes)
+        maximum number of nodes to prune
+
+    Returns
+    -------
+    nodes : numpy array
+        list of the nodes to remove to get to the optimal subtree.
+
+    References
+    ----------
+
+    .. [1] J. Friedman and T. Hastie, "The elements of statistical
+    learning", 2001, section 9.2.1
+
+    """
+
+    def _get_terminal_nodes(children):
+        """Lists the nodes that only have leaves as children"""
+        leaves = np.where(children[:,0]==_tree.TREE_LEAF)[0]
+        child_is_leaf = np.in1d(children, leaves).reshape(children.shape)
+        return np.where(np.all(child_is_leaf, axis=1))[0]
+
+    def _next_to_prune(tree, children=None):
+        """Weakest link pruning for the subtree defined by children"""
+
+        if children is None:
+            children = tree.children
+
+        t_nodes = _get_terminal_nodes(children)
+        g_i = tree.init_error[t_nodes] - tree.best_error[t_nodes]
+
+        return t_nodes[np.argmin(g_i)]
+
+    if max_to_prune is None:
+        max_to_prune = self.node_count - sum(self.children_left == _tree.TREE_UNDEFINED)
+
+    children = np.array([self.children_left.copy(), self.children_right.copy()]).T
+    nodes = list()
+
+    while True:
+        node = _next_to_prune(self, children)
+        nodes.append(node)
+
+        if (len(nodes) == max_to_prune) or (node == 0):
+            return np.array(nodes)
+
+        #Remove the subtree from the children array
+        children[children[node], :] = _tree.TREE_UNDEFINED
+        children[node, :] = _tree.TREE_LEAF
+
+def prune(self, n_leaves):
+    """Prunes the tree to obtain the optimal subtree with n_leaves leaves.
+
+
+    Parameters
+    ----------
+    n_leaves : int
+        The final number of leaves the algorithm should bring
+
+    Returns
+    -------
+    tree : a Tree object
+        returns a new, pruned, tree
+
+    References
+    ----------
+
+    .. [1] J. Friedman and T. Hastie, "The elements of statistical
+    learning", 2001, section 9.2.1
+
+    """
+    true_node_count = self.node_count - sum(self.children_left == _tree.TREE_UNDEFINED)
+    leaves = np.where(self.children_left == _tree.TREE_LEAF)[0]
+    to_remove_count = true_node_count - 2*n_leaves + 1
+
+    nodes_to_remove = pruning_order(self, max_to_prune = to_remove_count/2)
+
+    # self._copy is gone, but this does the same thing
+    out_tree = _tree.Tree(*self.__reduce__()[1])
+    out_tree.__setstate__(self.__getstate__().copy())
+
+    for node in nodes_to_remove:
+        #TODO: Add a Tree method to remove a branch of a tree
+        out_tree.children_left[out_tree.children_left[node]] = _tree.TREE_UNDEFINED
+        out_tree.children_right[out_tree.children_left[node]] = _tree.TREE_UNDEFINED
+        out_tree.children_left[out_tree.children_right[node]] = _tree.TREE_UNDEFINED
+        out_tree.children_right[out_tree.children_right[node]] = _tree.TREE_UNDEFINED
+        out_tree.children_left[node] = _tree.TREE_LEAF
+        out_tree.children_right[node] = _tree.TREE_LEAF
+
+    # FIXME: currently should not change node_count, after deletion
+    # this is not number of nodes in the tree
+    #out_tree.node_count -= 2*len(nodes_to_remove)
+
+    return out_tree
+
 # =============================================================================
 # Base decision tree
 # =============================================================================
@@ -110,8 +219,25 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
         self.tree_ = None
         self.max_features_ = None
 
-    def fit(self, X, y, sample_weight=None, check_input=True,
-            X_idx_sorted=None):
+    def prune(self, n_leaves):
+        """Prunes the decision tree
+
+        This method is necessary to avoid overfitting tree models. While broad
+        decision trees should be computed in the first place, pruning them
+        allows for smaller trees.
+
+        Parameters
+        ----------
+        n_leaves : int
+            the number of leaves of the pruned tree
+
+        """
+        self.tree_ = prune(self.tree_, n_leaves)
+        return self
+
+    def fit(self, X, y,
+            sample_mask=None, X_argsorted=None,
+            check_input=True, sample_weight=None):
         """Build a decision tree from the training set (X, y).
 
         Parameters
@@ -1020,3 +1146,70 @@ class ExtraTreeRegressor(DecisionTreeRegressor):
             max_features=max_features,
             max_leaf_nodes=max_leaf_nodes,
             random_state=random_state)
+        self.find_split_ = _tree.TREE_SPLIT_RANDOM
+
+
+def prune_path(clf, X, y, max_n_leaves=10, n_iterations=10,
+                          test_size=0.1, random_state=None):
+    """Cross validation of scores for different values of the decision tree.
+
+    This function allows to test what the optimal size of the post-pruned
+    decision tree should be. It computes cross validated scores for different
+    size of the tree.
+
+    Parameters
+    ----------
+    clf: decision tree estimator object
+        The object to use to fit the data
+
+    X: array-like of shape at least 2D
+        The data to fit.
+
+    y: array-like
+        The target variable to try to predict.
+
+    max_n_leaves : int, optional (default=10)
+        maximum number of leaves of the tree to prune
+
+    n_iterations : int, optional (default=10)
+        Number of re-shuffling & splitting iterations.
+
+    test_size : float (default=0.1) or int
+        If float, should be between 0.0 and 1.0 and represent the
+        proportion of the dataset to include in the test split. If
+        int, represents the absolute number of test samples.
+
+    random_state : int or RandomState
+        Pseudo-random number generator state used for random sampling.
+
+    Returns
+    -------
+    scores : list of list of floats
+        The scores of the computed cross validated trees grouped by tree size.
+        scores[0] correspond to the values of trees of size max_n_leaves and
+        scores[-1] to the tree with just two leaves.
+
+    """
+
+    from ..base import clone
+    from ..cross_validation import ShuffleSplit
+
+    scores = list()
+
+    kf = ShuffleSplit(len(y), n_iterations, test_size,
+                      random_state=random_state)
+    for train, test in kf:
+        estimator = clone(clf)
+        fitted = estimator.fit(X[train], y[train])
+
+        loc_scores = list()
+        for i in range(max_n_leaves, 1, -1):
+            #We loop from the bigger values to the smaller ones in order to be
+            #able to compute the original tree once, and then make it smaller
+
+            fitted.prune(n_leaves=i)
+            loc_scores.append(fitted.score(X[test], y[test]))
+
+        scores.append(loc_scores)
+
+    return zip(*scores)
