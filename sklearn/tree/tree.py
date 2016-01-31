@@ -63,10 +63,6 @@ DENSE_SPLITTERS = {"best": _splitter.BestSplitter,
 
 SPARSE_SPLITTERS = {"best": _splitter.BestSparseSplitter,
                     "random": _splitter.RandomSparseSplitter}
-
-REGRESSION = {
-    "mse": _tree.MSE,
-}
  
 def pruning_order(self, max_to_prune=None):
     """Compute the order for which the tree should be pruned.
