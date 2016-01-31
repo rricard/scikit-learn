@@ -233,7 +233,7 @@ class BaseDecisionTree(six.with_metaclass(ABCMeta, BaseEstimator,
 
     def fit(self, X, y,
             sample_mask=None, X_argsorted=None,
-            check_input=True, sample_weight=None):
+            check_input=True, sample_weight=None, X_idx_sorted=None):
         """Build a decision tree from the training set (X, y).
 
         Parameters
